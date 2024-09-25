@@ -3,53 +3,6 @@ import networkx as nx
 from typing import Sequence, Callable
 
 
-def initial_estimates_mip(
-    preference_graph: nx.DiGraph,
-    partition_sizes: Sequence[int],
-    max_used_partitions: int
-) -> dict[int,list]:
-    """Finds a feasible (suboptimal) solution to initialise the IP.
-    
-    :param preference_graph: The digraph where edges show preferences to be in the
-        same partition, with edge weights specified in the `_weight_key` parameter.
-    :type preference_graph: nx.DiGraph
-    :param partitions_sizes: A sequence of the available partition sizes.
-    :type partitions_sizes: Sequence[int]
-    :param max_used_partitions: Maximum number of allowed partitions. Defaults to 
-        `len(partitions_sizes)`.
-    :type max_used_partitions: int
-
-    :returns: A potentially incomplete dictionary specifying partitions and initial
-        candidates. It can be used to initialise the MIP.
-    :rtype: dict[int,list]
-    """
-    remaining_partition_sizes = [x for x in partition_sizes]
-    partitions = {}
-    components_left = list(nx.connected_components(preference_graph.to_undirected()))
-    while (len(components_left) > 0)\
-        and (len(remaining_partition_sizes) > 0)\
-        and len(partitions) < max_used_partitions:
-        comp_vertices = components_left.pop()
-        comp = preference_graph.subgraph(comp_vertices)
-        if comp.order() <= max(remaining_partition_sizes):
-            partition_idx = min([x for x in remaining_partition_sizes if x >= comp.order()])
-            remaining_partition_sizes.pop(partition_idx)
-            partitions[partition_idx] = list(comp.nodes)
-        else:
-            # iteratively split with the Fiedler vector
-            part1, part2 = [], []
-            fiedler = nx.fiedler_vector(comp.to_undirected())
-            for v, coeff in zip(comp.nodes, fiedler):
-                if coeff >= 0:
-                    part1.append(v)
-                else:
-                    part2.append(v)
-            components_left.append( comp.subgraph(part1) )
-            components_left.append( comp.subgraph(part2) )
-    # remaining nodes will be unassigned
-    return partitions
-
-
 def solve_mip(
     preference_graph: nx.DiGraph,
     partition_sizes: Sequence[int],  # all rooms and their sizes, for example 40*[2] + 10*[3] for 40 2-bedrooms and 10 3-bedrooms
@@ -117,10 +70,8 @@ def solve_mip(
     if isinstance(_occupancy_costs, (float,int)):
         _occupancy_costs = n_partitions*[_occupancy_costs]
 
-    
-
     # Set up the IP Variables
-    lp_problem = plp.LpProblem("Preference Matching", plp.LpMinimize)
+    lp_problem = plp.LpProblem("PreferenceMatching", plp.LpMinimize)
     
     # Assignments: x[v,i]=1 if node v is in partition i
     x_assignment = plp.LpVariable.dicts(
@@ -202,7 +153,7 @@ def solve_mip(
                 solution[i].append(v)
     assert plp.value(total_partitions_used) == len([
         i for i in solution if len(solution[i]) > 0])
-    return solution, plp.value(objective)
+    return solution, (plp.value(objective), plp.value(partition_costs))
 
 
 if __name__ == "__main__":
