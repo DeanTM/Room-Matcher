@@ -42,6 +42,28 @@ def compute_occupancy_cost(
     return cost
 
 
+def _default_weights(g,e):
+    """This is a function because multiprocessing cannot pickle lambda expressions."""
+    return 1.
+
+def evaluate(
+    partitions: list,
+    preference_graph: nx.DiGraph,
+    _default_weights: Callable[[nx.DiGraph, tuple], float] = _default_weights,
+    _weight_key: str='weight',
+    _occupancy_costs: Sequence[float]|float=0,
+) -> float:
+    cut_cost = compute_cut_cost(
+        partitions=partitions,
+        preference_graph=preference_graph,
+        _default_weights=_default_weights,
+        _weight_key=_weight_key)
+    occupancy_cost = compute_occupancy_cost(
+        partitions=partitions,
+        _occupancy_costs=_occupancy_costs)
+    return cut_cost, occupancy_cost
+
+
 def move_elements(
     partitions: list[list],
     partition_sizes: Sequence[int],
@@ -92,22 +114,80 @@ def solve_ea(
     partition_sizes: Sequence[int],  # all rooms and their sizes, for example 40*[2] + 10*[3] for 40 2-bedrooms and 10 3-bedrooms
     population_size: int,
     n_generations: int,
-    move_rate: float=1.,
     max_used_partitions: int|None=None,  # if None, assume all partitions can be used
-    verbose: bool=True,
     initial_solution: dict[int,str]|None=None,
+    verbose: bool=True,
+    timeLimit: float|None=None,
+    move_rate: float=1.,
     _occupancy_costs: Sequence[float]|float=0,
-    _default_weights: Callable[[nx.DiGraph, tuple], float] = lambda g,e: 1.,
+    _default_weights: Callable[[nx.DiGraph, tuple], float] = _default_weights,
     _weight_key: str='weight',
-    _hall_of_fame_size: int|None=None,
+    _hall_of_fame_size: int=1,
     _num_workers: int=0,
-    timeLimit: float|None=None  # seconds
 ) -> tuple[dict[str,dict], tuple[float,float]]:
+    """Solves the graph partition problem on the given `preference_graph` using a 
+    simple evolutionary algorithm (without crossover).
+
+    :param preference_graph: The digraph where edges show preferences to be in the
+        same partition, with edge weights specified in the `_weight_key` parameter.
+    :type preference_graph: nx.DiGraph
+    :param partitions_sizes: A sequence of the available partition sizes.
+    :type partitions_sizes: Sequence[int]
+    :param max_used_partitions: Maximum number of allowed partitions. Defaults to 
+        `len(partitions_sizes)`.
+    :type max_used_partitions: int
+    :param initial_solution: A candidate initial solution to seed the process.
+    :type initial_solution: dict[int,str], optional
+    :param verbose: Whether to print solver steps. Defaults to True.
+    :type verbose: bool
+    :param timeLimit: If given, gives a threshold in seconds after which the evolution
+        will stop.
+    :type timeLimit: float, optional
+    :param move_rate: The Poisson rate for moving elements between different sets in
+        the partition. Defaults to 1. i.e. on average, one element is moved within each
+        candidate solution at every generation.
+    :type move_rate: float
+    :param _occupancy_costs: The cost of each occupied room (relative to the preference
+        weights). Defaults to 0.
+    :type _occupancy_costs: Sequence[float] | float
+    :param _default_weights: A function that accepts the graph and an edge, and returns
+        the edge weight, in the instance that the weights at `_weight_key` are not
+        available. Defaults to a function returning 1.
+    :type _default_weights: Callable[[DiGraph, tuple], float],
+    :param _weight_key: The key for the weight in the graph's edge data. Defaults to
+        "weight".
+    :type _weight_key: str
+    :param _hall_of_fame_size: Number of candidates to maintain in the hall of fame. 
+        Defaults to 1 because the hall of fame is not returned.
+    :type _hall_of_fame_size: int
+    :param _num_workers: Number of multiprocessing pools to use when evaluating operations
+        over the population. Because of parallel overhead, this usually seems to be slower.
+        Hence it defaults to 0, but is kept for completeness.
+    :type _num_workers: int
+
+
+    ## Usage
+
+    Assume we have 20 available rooms, 10 of which can be converted in 3-bed rooms,
+    while all of them can be at-least-2-bed rooms. We let the algorithm decide whether
+    to use 3 beds or two, but we provide all options. We can also assume that -bed rooms
+    are slightly more expensive, but not so much that it's worth breaking preferences
+    over.
+
+    ```python
+        solution, cost = solve_ea(
+            preference_graph,
+            partition_sizes = 20*[2] + 10*[3],
+            max_used_partitions = 20,
+            _occupancy_costs = 20*[0.002] + 10*[0.003]
+        )
+    ```
+    """
     if timeLimit is not None:
         start_time = time.time()
     
     if _hall_of_fame_size is None:
-        _hall_of_fame_size = population_size
+        _hall_of_fame_size = 1
     
     # Create base classes
     # implement as multi-objective optimisation
@@ -138,25 +218,23 @@ def solve_ea(
     toolbox.register("mutate", move_elements,
                      max_used_partitions=max_used_partitions,
                      partition_sizes=partition_sizes)
-    # move_elements(
-    #     partitions: list[list],
-    #     partition_sizes: Sequence[int],
-    #     max_used_partitions: int,
-    #     num_to_move: int=1
-    # )
 
-    def _evaluate(partitions: list) -> float:
-        cut_cost = compute_cut_cost(
-            partitions=partitions,
-            preference_graph=preference_graph,
-            _default_weights=_default_weights,
-            _weight_key=_weight_key)
-        occupancy_cost = compute_occupancy_cost(
-            partitions=partitions,
-            _occupancy_costs=_occupancy_costs)
-        return cut_cost, occupancy_cost  # must return a tuple
+    # def _evaluate(partitions: list) -> float:
+    #     cut_cost = compute_cut_cost(
+    #         partitions=partitions,
+    #         preference_graph=preference_graph,
+    #         _default_weights=_default_weights,
+    #         _weight_key=_weight_key)
+    #     occupancy_cost = compute_occupancy_cost(
+    #         partitions=partitions,
+    #         _occupancy_costs=_occupancy_costs)
+    #     return cut_cost, occupancy_cost  # must return a tuple
         
-    toolbox.register("evaluate", _evaluate)
+    toolbox.register("evaluate", evaluate,
+                     preference_graph=preference_graph,
+                     _default_weights=_default_weights,
+                     _weight_key=_weight_key,
+                     _occupancy_costs=_occupancy_costs)
     toolbox.register("select", tools.selTournament, tournsize=3)
 
     # __name__ __main__ is a windows safety checksafety check on windows
@@ -219,6 +297,9 @@ def solve_ea(
             ind.fitness.values = fit
         population = mutated_offspring
 
+    if _num_workers > 0: 
+        pool.close()
+
     # return population, hall_of_fame
     return dict(enumerate(hall_of_fame[0])), hall_of_fame[0].fitness.values
 
@@ -241,22 +322,14 @@ if __name__ == "__main__":
         max_used_partitions = 20,
         _occupancy_costs = 20*[0.005] + 10*[0.006],
         n_generations = 100,
-        population_size = 100,
+        population_size = 1000,
         # initial_solution=initial_solution,
         verbose=True,
+        _num_workers=4,
         timeLimit=60)
     solution_nonempty = {k:v for k,v in solution.items() if len(v) > 0}
     print(f"{cost=}, {len(solution_nonempty)=}")
     pprint(solution_nonempty)
-    print(preference_graph.order)
+    print(preference_graph.order())
     print(sum(len(v) for v in solution.values()))
     print(len(set(sum(solution.values(), []))))
-
-    # print(
-    #     "FINAL POPULATION",
-    #     *zip((ind.fitness.values for ind in final_population), final_population),
-    #     sep="\n")
-    # print(
-    #     "HALL OF FAME",
-    #     *zip((ind.fitness.values for ind in hall_of_fame), hall_of_fame[:3]),
-    #     sep="\n")

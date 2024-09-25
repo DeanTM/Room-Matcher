@@ -7,14 +7,15 @@ def solve_mip(
     preference_graph: nx.DiGraph,
     partition_sizes: Sequence[int],  # all rooms and their sizes, for example 40*[2] + 10*[3] for 40 2-bedrooms and 10 3-bedrooms
     max_used_partitions: int|None=None,  # if None, assume all partitions can be used
-    verbose: bool=True,
     initial_solution: dict[int,str]|None=None,
+    verbose: bool=True,
     _occupancy_costs: Sequence[float]|float=0,
     _default_weights: Callable[[nx.DiGraph, tuple], float] = lambda g,e: 1.,
     _weight_key: str='weight',
     **solver_kwargs
-) -> tuple[dict[str,dict], float]:
-    """Solves the graph partition problem on the given `preference_graph`.
+) -> tuple[dict[str,dict], tuple[float,float]]:
+    """Solves the graph partition problem on the given `preference_graph` using a
+    mixed integer program.
 
     :param preference_graph: The digraph where edges show preferences to be in the
         same partition, with edge weights specified in the `_weight_key` parameter.
@@ -24,6 +25,8 @@ def solve_mip(
     :param max_used_partitions: Maximum number of allowed partitions. Defaults to 
         `len(partitions_sizes)`.
     :type max_used_partitions: int
+    :param initial_solution: A candidate initial solution to seed the process.
+    :type initial_solution: dict[int,str], optional
     :param verbose: Whether to print solver steps. Defaults to True.
     :type verbose: bool
     :param _occupancy_costs: The cost of each occupied room (relative to the preference
@@ -36,7 +39,9 @@ def solve_mip(
     :param _weight_key: The key for the weight in the graph's edge data. Defaults to
         "weight".
     :type _weight_key: str
-    :param **solver_kwargs: kwargs passed on to the default PuLP solver.
+    :param **solver_kwargs: kwargs passed on to the default PuLP solver. For example,
+        one may set `timeLimit` to force the search to stop after a specified number
+        of seconds.
 
 
     ## Usage
