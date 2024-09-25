@@ -53,7 +53,7 @@ def solve_mip(
     over.
 
     ```python
-        solution, cost = solve_ip(
+        solution, cost = solve_mip(
             preference_graph,
             partition_sizes = 20*[2] + 10*[3],
             max_used_partitions = 20,

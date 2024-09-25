@@ -15,12 +15,12 @@ def extract_emails(text: str):
     
     return emails
 
-def extract_vertices_and_edges(csvfile):
+def extract_vertices_and_edges(csvfile, source_col: int=0, target_col: int=3):
     V, E = [], []
     reader = csv.reader(csvfile, delimiter="\t")
     for row in reader:
-        source = extract_emails(row[0].lower())
-        targets = extract_emails(row[3].lower())
+        source = extract_emails(row[source_col].lower())
+        targets = extract_emails(row[target_col].lower())
         if source:
             s = source[0]
             V.append(s)
@@ -30,8 +30,11 @@ def extract_vertices_and_edges(csvfile):
 
 
 if __name__ == "__main__":
+    import sys
+
+    preferences_file = sys.argv[1]
     # Build graph
-    with open("Student Retreat planning 2024 - Room Preferences.tsv", "r") as csvfile:
+    with open(preferences_file, "r") as csvfile:
         V, E = extract_vertices_and_edges(csvfile)
     # remove out-of-graph preferences
     E = [(u,v) for (u,v) in E if v in V and u in V]
