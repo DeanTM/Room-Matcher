@@ -1,0 +1,6 @@
+email	some column	another column	preferences	yet another column  
+deantm4@gmail.com	foo	bar	noreply@someservice.org,	foobar
+noreply@someservice.org	foo	bar	elon@musk.com, bill@gates.com	foobar
+elon@musk.com	foo	bar	noreply@someservice.org, jeff@bezos.com	foobar
+bill@gates.com	foo	bar	steve@jobs.com,	foobar
+steve@jobs.com	foo	bar	bill@gates.com,	foobar
