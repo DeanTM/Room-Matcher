@@ -61,7 +61,13 @@ if __name__ == "__main__":
     occupancy_costs = 44*[0.2] + 12*[0.25]
     default_weights = lambda *args: 1.0
     verbose = True
-    timeLimit = 10
+    timeLimit = 20
+
+    # fail-fast
+    if max_used_partitions:
+        if (total_spaces:=sum(sorted(partition_sizes)[-max_used_partitions:])) < len(V):
+            raise ValueError(
+                f"Not possible to assign {len(V)} vertices in {total_spaces} spaces.")
 
     # Get initial estimate
     initial_solution = initial_estimates(
@@ -89,6 +95,7 @@ if __name__ == "__main__":
         population_size=1000,
         n_generations=1000,
         move_rate=1.,
+        shuffle_rate=2.,
         partition_sizes=partition_sizes,
         max_used_partitions=max_used_partitions,
         initial_solution=solution,

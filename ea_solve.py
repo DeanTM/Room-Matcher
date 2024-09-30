@@ -109,6 +109,51 @@ def move_elements(
     return partitions
 
 
+def shuffle_elements(
+    partitions: list[list],
+    num_to_shuffle: int=2
+) -> list[list]:
+    partitions = copy.deepcopy(partitions)
+    # Step 1: select up to num_to_shuffle-many non-empty partitions
+    selected_partitions = random.choices(
+        partitions,
+        k=min(len(partitions),num_to_shuffle))
+    # Step 2: pop a candidate from each selected partition
+    candidates = []
+    subselected_partitions = []  # separate list, of the same length as `candidates`
+    for partition in selected_partitions:
+        # in case of multiply-selected partitions becoming empty,
+        # we first ensure that `partition` is non-empty:
+        if partition:
+            candidate = partition.pop(random.randint(0,len(partition)-1))
+            candidates.append(candidate)
+            subselected_partitions.append(partition)
+    # Step 3: shuffle the popped candidates
+    random.shuffle(candidates)
+    # Step 4: put the candidates back into the partition
+    for c,p in zip(candidates, subselected_partitions):
+        p.append(c)
+    return partitions
+
+
+def _mutate(
+    partitions: list[list],
+    partition_sizes: Sequence[int],
+    max_used_partitions: int,
+    num_to_move: int=1,
+    num_to_shuffle: int=2
+) -> list[list]:
+    partitions = move_elements(
+        partitions=partitions,
+        partition_sizes=partition_sizes,
+        max_used_partitions=max_used_partitions,
+        num_to_move=num_to_move)
+    partitions = shuffle_elements(
+        partitions=partitions,
+        num_to_shuffle=num_to_shuffle)
+    return partitions
+
+
 def solve_ea(
     preference_graph: nx.DiGraph,
     partition_sizes: Sequence[int],  # all rooms and their sizes, for example 40*[2] + 10*[3] for 40 2-bedrooms and 10 3-bedrooms
@@ -119,12 +164,14 @@ def solve_ea(
     verbose: bool=True,
     timeLimit: float|None=None,
     move_rate: float=1.,
+    shuffle_rate: float=2.,
     _occupancy_costs: Sequence[float]|float=0,
     _default_weights: Callable[[nx.DiGraph, tuple], float] = _default_weights,
     _weight_key: str='weight',
     _hall_of_fame_size: int=1,
     _num_workers: int=0,
-) -> tuple[dict[str,dict], tuple[float,float]]:
+    _return_hof: bool=False
+) -> tuple[dict[str,dict], tuple[float,float]]|creator.HallOfFame:
     """Solves the graph partition problem on the given `preference_graph` using a 
     simple evolutionary algorithm (without crossover).
 
@@ -147,6 +194,10 @@ def solve_ea(
         the partition. Defaults to 1. i.e. on average, one element is moved within each
         candidate solution at every generation.
     :type move_rate: float
+    :param shuffle_rate: The Poisson rate for shuffling elements between different sets in
+        the partition. Defaults to 2. i.e. on average, two elements are shuffled between 
+        two partitions.
+    :type shuffle_rate: float
     :param _occupancy_costs: The cost of each occupied room (relative to the preference
         weights). Defaults to 0.
     :type _occupancy_costs: Sequence[float] | float
@@ -215,7 +266,7 @@ def solve_ea(
     toolbox = base.Toolbox()
     toolbox.register("individual", _create_individual)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-    toolbox.register("mutate", move_elements,
+    toolbox.register("mutate", _mutate,
                      max_used_partitions=max_used_partitions,
                      partition_sizes=partition_sizes)
 
@@ -285,10 +336,15 @@ def solve_ea(
         offspring = list(toolbox.map(copy.deepcopy, selected))
         nums_to_move = np.clip(
             np.random.poisson(move_rate, population_size), 0, preference_graph.order())
+        nums_to_shuffle = np.random.poisson(shuffle_rate, population_size)
         mutated_offspring = []
-        for potential_mutant, num_to_move in zip(offspring, nums_to_move):
-            if num_to_move > 0:
-                potential_mutant = toolbox.mutate(potential_mutant, num_to_move=num_to_move)
+        for potential_mutant, num_to_move, num_to_shuffle in zip(
+            offspring, nums_to_move, nums_to_shuffle):
+            if num_to_move > 0 or num_to_shuffle > 0:
+                potential_mutant = toolbox.mutate(
+                    potential_mutant,
+                    num_to_move=num_to_move,
+                    num_to_shuffle=num_to_shuffle)
                 del potential_mutant.fitness.values
             mutated_offspring.append(potential_mutant)
         unevaluated_pop = [ind for ind in mutated_offspring if not ind.fitness.valid]
@@ -300,7 +356,8 @@ def solve_ea(
     if _num_workers > 0: 
         pool.close()
 
-    # return population, hall_of_fame
+    if _return_hof:
+        return _return_hof
     return dict(enumerate(hall_of_fame[0])), hall_of_fame[0].fitness.values
 
 
